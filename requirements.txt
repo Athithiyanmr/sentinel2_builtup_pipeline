@@ -1,0 +1,14 @@
+geopandas
+rasterio
+numpy
+scikit-learn
+joblib
+tqdm
+pystac-client
+planetary-computer
+requests
+shapely
+pandas
+scikit-image
+osmnx
+matplotlib
