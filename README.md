@@ -87,9 +87,13 @@ scripts/
 
 ⚙️ Installation
 1. Install Dependencies
-   pip install -r requirements.txt
-2. Prepare Input Data
+
+   conda install -r requirements.txt
+   
+3. Prepare Input Data
+   
 ✔ Place AOI under:
+
 data/aoi/CMDA.shp
 
 ✔ Place training dataset under:
