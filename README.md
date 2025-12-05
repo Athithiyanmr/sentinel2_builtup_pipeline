@@ -87,9 +87,20 @@ scripts/
 
 ⚙️ Installation
 1. Install Dependencies
-   pip install -r requirements.txt
-2. Prepare Input Data
+   
+	conda create --name xyz python==3.10
+	
+	conda activate xyz
+	
+	conda install jupyter nbconvert
+	
+	conda install --file requirements.txt -c conda-forge
+
+   
+3. Prepare Input Data
+   
 ✔ Place AOI under:
+
 data/aoi/CMDA.shp
 
 ✔ Place training dataset under:
