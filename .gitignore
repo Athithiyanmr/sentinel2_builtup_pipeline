@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# virtualenv
+.env
+.venv
+venv/
+
+# Jupyter
+.ipynb_checkpoints
+
+# data & outputs (do NOT commit huge binaries)
+data/
+*.tif
+*.jp2
+*.part
+models/
+predictions/
+*.sqlite
+*.gpkg
+
+# OS
+.DS_Store
+Thumbs.db
