@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+# +
+# #!/usr/bin/env python3
 """
-Simple, readable downloader for Sentinel-2 L2A via Microsoft Planetary Computer STAC.
+Jupyter-friendly Sentinel-2 downloader for Microsoft Planetary Computer STAC.
 
-Edit the CONFIG block below to change where files go or which year/cloud filter to use.
-Run with: python scripts/download_s2_pc_by_tile.py
-Or override defaults using CLI args (see --help).
+Usage:
+  # Preferred in a terminal
+  python scripts/download_s2_pc_by_tile.py --outdir data/sentinel --aoi data/aoi/CMDA.shp --year 2025
+
+  # In Jupyter: call run(...) directly from a cell (example below).
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import time
 import csv
 import logging
 import argparse
+import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Tuple, Dict
@@ -186,6 +191,9 @@ def run(
     retry_count: int = DEFAULT_RETRY,
     timeout: int = DEFAULT_TIMEOUT,
 ):
+    """
+    Main downloader function. Call this directly from a notebook or from CLI.
+    """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -272,9 +280,9 @@ def run(
 
 
 # -------------------------
-# CLI wrapper (optional)
+# CLI wrapper (safe for Jupyter)
 # -------------------------
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Simple Sentinel-2 downloader (Planetary Computer).")
     p.add_argument("--outdir", "-o", default=DEFAULT_OUTDIR, help="Output root folder (default: data/sentinel)")
     p.add_argument("--aoi", "-a", default=DEFAULT_AOI, help="AOI path (default: data/aoi/CMDA.shp)")
@@ -283,11 +291,22 @@ def parse_args():
     p.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS, help="Download threads")
     p.add_argument("--retry", type=int, default=DEFAULT_RETRY, help="Retries per file")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="HTTP timeout (s)")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    """
+    Entry point that is Jupyter-safe:
+    - If run from terminal, argv is None (argparse uses sys.argv)
+    - If imported/used in notebook, pass a list or call main(['--outdir', '...'])
+    """
+    # Detect if running inside ipykernel and when no explicit argv passed, avoid using Jupyter kernel args
+    if argv is None and "ipykernel" in sys.modules:
+        # run with defaults (safe) — you can still call run(...) manually below in notebook with custom args
+        args = parse_args([])
+    else:
+        args = parse_args(argv)
+
     run(
         outdir=args.outdir,
         aoi_path=args.aoi,
@@ -301,5 +320,6 @@ def main():
     )
 
 
+    
 if __name__ == "__main__":
     main()
