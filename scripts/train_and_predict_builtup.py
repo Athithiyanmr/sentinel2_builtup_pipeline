@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(".").resolve()
 
 OUTPUT_ROOT = PROJECT_ROOT / "output"
 MODELS_DIR = OUTPUT_ROOT / "model"
-PREDICTION_DIR = OUTPUT_ROOT / "prediction"
+PREDICTION_DIR = OUTPUT_ROOT / "predictions"
 
 DEFAULT_ROOT = "data/sentinel"
 DEFAULT_TRAIN_VECTOR = "data/training/CMDA_overall.shp"
