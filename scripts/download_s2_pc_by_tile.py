@@ -2,12 +2,13 @@
 # +
 # #!/usr/bin/env python3
 """
-Sentinel-2 monthly downloader (Planetary Computer)
+Sentinel-2 monthly downloader with month-wise folders
 
-✔ Correct tile detection (mgrs:tile)
-✔ 1 image per month per tile
-✔ Adaptive cloud thresholds (5 → 10 → 20)
-✔ Skip existing bands
+✔ Tile/MGRS safe
+✔ 12 month folders per tile
+✔ Adaptive cloud expansion until image found
+✔ Select least-cloud image per month
+✔ Skip existing item-band files
 ✔ Per-tile CSV provenance
 ✔ Jupyter + CLI safe
 """
@@ -31,6 +32,7 @@ from shapely.geometry import mapping
 from pystac_client import Client
 import planetary_computer as pc
 import requests
+import calendar
 
 # --------------------------------------------------
 # CONFIG
@@ -39,7 +41,8 @@ DEFAULT_OUTDIR = "data/sentinel"
 DEFAULT_AOI = "data/aoi/CMDA.shp"
 DEFAULT_YEAR = 2025
 
-CLOUD_STEPS = (5, 10, 20)
+# progressive cloud expansion
+CLOUD_STEPS = (5, 10, 20, 40, 60, 80)
 
 BANDS_10M = ["B02", "B03", "B04", "B08", "TCI"]
 BANDS_20M = ["B11", "SCL"]
@@ -67,9 +70,6 @@ def detect_tile_id(item) -> str:
     tile = props.get("mgrs:tile")
     if tile:
         return tile
-    for k in ("sentinel:tile_id", "sentinel:tileid", "sentinel:tileId"):
-        if k in props:
-            return props[k]
     text = f"{item.id} {props.get('title','')}".upper()
     m = re.search(r"T\d{2}[A-Z]{3}", text)
     if m:
@@ -112,7 +112,7 @@ def download(url: str, outpath: Path):
             time.sleep(1 + attempt)
 
 # --------------------------------------------------
-# MONTHLY SELECTION
+# MONTHLY SELECTION (EXPANDING CLOUD)
 # --------------------------------------------------
 def select_monthly_items(items):
     by_month = defaultdict(list)
@@ -123,7 +123,7 @@ def select_monthly_items(items):
         month = datetime.fromisoformat(dt.replace("Z", "")).month
         by_month[month].append(it)
 
-    selected = []
+    monthly_best = {}
     report = []
 
     for m in range(1, 13):
@@ -144,9 +144,9 @@ def select_monthly_items(items):
                 break
 
         if chosen:
-            selected.append(chosen)
+            monthly_best[m] = chosen
             report.append({
-                "month": m,
+                "month": calendar.month_name[m],
                 "image_available": "Yes",
                 "item_id": chosen.id,
                 "datetime": chosen.properties.get("datetime"),
@@ -155,7 +155,7 @@ def select_monthly_items(items):
             })
         else:
             report.append({
-                "month": m,
+                "month": calendar.month_name[m],
                 "image_available": "No",
                 "item_id": None,
                 "datetime": None,
@@ -163,21 +163,14 @@ def select_monthly_items(items):
                 "cloud_threshold": None,
             })
 
-    return selected, report
+    return monthly_best, report
 
 # --------------------------------------------------
 # DOWNLOAD TASK
 # --------------------------------------------------
 def download_task(item, band: str, outdir: Path):
-    """
-    Download a single band for a single item.
-    Skips ONLY if that exact item-band already exists.
-    """
     outdir.mkdir(parents=True, exist_ok=True)
-
-    # Check if this item-band already exists
-    existing = list(outdir.glob(f"{item.id}_{band}.*"))
-    if existing:
+    if list(outdir.glob(f"{item.id}_{band}.*")):
         return item.id, band, "skipped_existing", None
 
     href = find_asset(item, band)
@@ -191,13 +184,9 @@ def download_task(item, band: str, outdir: Path):
     return item.id, band, "ok" if ok else "error", err
 
 # --------------------------------------------------
-# MAIN PIPELINE
+# MAIN
 # --------------------------------------------------
-def run(
-    outdir: str = DEFAULT_OUTDIR,
-    aoi_path: str = DEFAULT_AOI,
-    year: int = DEFAULT_YEAR,
-):
+def run(outdir=DEFAULT_OUTDIR, aoi_path=DEFAULT_AOI, year=DEFAULT_YEAR):
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -213,59 +202,51 @@ def run(
     items = list(search.get_items())
     log.info("Found %d Sentinel-2 items", len(items))
 
-    items_by_tile: Dict[str, List] = defaultdict(list)
+    items_by_tile = defaultdict(list)
     for it in items:
         items_by_tile[detect_tile_id(it)].append(it)
 
     for tile, tile_items in items_by_tile.items():
         tile_dir = outdir / tile
-        d10 = tile_dir / "10m"
-        d20 = tile_dir / "20m"
-
-        selected, report = select_monthly_items(tile_items)
-
-        # Write per-tile CSV
         tile_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = tile_dir / "tile_image_summary.csv"
-        with open(csv_path, "w", newline="") as f:
+
+        monthly_items, report = select_monthly_items(tile_items)
+
+        # write tile summary
+        with open(tile_dir / "tile_image_summary.csv", "w", newline="") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=[
-                    "tile", "month", "image_available",
-                    "item_id", "datetime",
-                    "cloud_cover", "cloud_threshold",
+                    "month", "image_available", "item_id",
+                    "datetime", "cloud_cover", "cloud_threshold"
                 ],
             )
             writer.writeheader()
-            for r in report:
-                r["tile"] = tile
-                writer.writerow(r)
+            writer.writerows(report)
 
-        # Download
-        tasks = []
-        for it in selected:
+        # download per month
+        for m, item in monthly_items.items():
+            month_name = calendar.month_name[m]
+            d10 = tile_dir / month_name / "10m"
+            d20 = tile_dir / month_name / "20m"
+
+            tasks = []
             for b in BANDS_10M:
-                tasks.append((it, b, d10))
+                tasks.append((item, b, d10))
             for b in BANDS_20M:
-                tasks.append((it, b, d20))
+                tasks.append((item, b, d20))
 
-        with ThreadPoolExecutor(MAX_WORKERS) as ex:
-            futures = [ex.submit(download_task, *t) for t in tasks]
-            for f in as_completed(futures):
-                iid, band, status, msg = f.result()
-                if status == "ok":
-                    log.info("[%s] downloaded %s", tile, band)
-                elif status == "skipped_existing":
-                    log.debug("[%s] skipped %s", tile, band)
-                elif status == "missing_asset":
-                    log.warning("[%s] missing %s", tile, band)
-                else:
-                    log.error("[%s] failed %s: %s", tile, band, msg)
+            with ThreadPoolExecutor(MAX_WORKERS) as ex:
+                futures = [ex.submit(download_task, *t) for t in tasks]
+                for f in as_completed(futures):
+                    iid, band, status, msg = f.result()
+                    if status == "ok":
+                        log.info("[%s %s] downloaded %s", tile, month_name, band)
 
-    log.info("Download completed successfully.")
+    log.info("Monthly download completed successfully.")
 
 # --------------------------------------------------
-# CLI SAFE ENTRY
+# CLI
 # --------------------------------------------------
 def main(argv=None):
     if argv is None and "ipykernel" in sys.modules:
@@ -277,7 +258,6 @@ def main(argv=None):
         p.add_argument("--year", type=int, default=DEFAULT_YEAR)
         a = p.parse_args(argv)
         run(a.outdir, a.aoi, a.year)
-
 
 if __name__ == "__main__":
     main()
