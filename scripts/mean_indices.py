@@ -2,11 +2,13 @@
 # +
 # #!/usr/bin/env python3
 """
-Monthly → Tile Mean Indices (Sentinel-2)
+Monthly → Tile-level Indices (Sentinel-2)
 
 • One image per month
 • Compute selected indices
-• Aggregate monthly rasters → MEAN per tile
+• Aggregate monthly rasters → MEAN + MEDIAN per tile
+• Skips months already processed
+• Memory-safe aggregation using xarray + dask
 """
 
 from pathlib import Path
@@ -15,6 +17,10 @@ import rasterio
 from rasterio.warp import reproject
 from rasterio.enums import Resampling
 import logging
+
+import xarray as xr
+import rioxarray as rxr
+from dask.diagnostics import ProgressBar
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 log = logging.getLogger("monthly-indices")
@@ -25,7 +31,7 @@ MONTHS = [
 ]
 
 # --------------------------------------------------
-# Index functions
+# Index math
 # --------------------------------------------------
 def safe_div(a, b):
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -36,11 +42,12 @@ def safe_div(a, b):
 def NDVI(b08, b04): return safe_div(b08, b04)
 def NDBI(b11, b08): return safe_div(b11, b08)
 def BSI(b11, b04, b08, b02):
-    return safe_div((b11 + b04) - (b08 + b02), (b11 + b04) + (b08 + b02))
+    return safe_div((b11 + b04) - (b08 + b02),
+                    (b11 + b04) + (b08 + b02))
 def MNDWI(b03, b11): return safe_div(b03, b11)
 
 # --------------------------------------------------
-# Helpers
+# Raster helpers
 # --------------------------------------------------
 def read_band(path):
     with rasterio.open(path) as src:
@@ -65,9 +72,18 @@ def write(path, arr, profile):
         dst.write(arr, 1)
 
 # --------------------------------------------------
-# STEP 1 — MONTHLY INDICES
+# Helper — check if month already processed
 # --------------------------------------------------
-def compute_monthly_indices(tile_dir: Path, indices: list[str]):
+def monthly_indices_exist(idx_dir: Path, itemid: str, indices):
+    return all(
+        (idx_dir / f"{itemid}_{idx}.tif").exists()
+        for idx in indices
+    )
+
+# --------------------------------------------------
+# STEP 1 — Monthly indices (SKIP IF EXISTS)
+# --------------------------------------------------
+def compute_monthly_indices(tile_dir: Path, indices, overwrite=False):
     for month in MONTHS:
         m10 = tile_dir / month / "10m"
         m20 = tile_dir / month / "20m"
@@ -81,79 +97,84 @@ def compute_monthly_indices(tile_dir: Path, indices: list[str]):
         if not b08_files:
             continue
 
-        b08_path = b08_files[0]
-        itemid = b08_path.stem.replace("_B08", "")
+        itemid = b08_files[0].stem.replace("_B08", "")
+
+        # 🔁 Skip if already done
+        if not overwrite and monthly_indices_exist(idx_dir, itemid, indices):
+            log.info("[%s %s] indices already exist → skipped", tile_dir.name, month)
+            continue
 
         try:
-            b08, prof = read_band(b08_path)
+            b08, prof = read_band(m10 / f"{itemid}_B08.tif")
             b04, _ = read_band(m10 / f"{itemid}_B04.tif")
 
             if "NDVI" in indices:
-                write(idx_dir / f"{itemid}_NDVI.tif", NDVI(b08, b04), prof)
+                out = idx_dir / f"{itemid}_NDVI.tif"
+                if overwrite or not out.exists():
+                    write(out, NDVI(b08, b04), prof)
 
-            if "NDBI" in indices or "BSI" in indices or "MNDWI" in indices:
+            if any(i in indices for i in ("NDBI","BSI","MNDWI")):
                 b11, p11 = read_band(m20 / f"{itemid}_B11.tif")
                 if p11["width"] != prof["width"]:
                     b11 = resample(b11, p11, prof)
 
             if "NDBI" in indices:
-                write(idx_dir / f"{itemid}_NDBI.tif", NDBI(b11, b08), prof)
+                out = idx_dir / f"{itemid}_NDBI.tif"
+                if overwrite or not out.exists():
+                    write(out, NDBI(b11, b08), prof)
 
             if "BSI" in indices:
-                b02, _ = read_band(m10 / f"{itemid}_B02.tif")
-                write(idx_dir / f"{itemid}_BSI.tif", BSI(b11, b04, b08, b02), prof)
+                out = idx_dir / f"{itemid}_BSI.tif"
+                if overwrite or not out.exists():
+                    b02, _ = read_band(m10 / f"{itemid}_B02.tif")
+                    write(out, BSI(b11, b04, b08, b02), prof)
 
             if "MNDWI" in indices:
-                b03, _ = read_band(m10 / f"{itemid}_B03.tif")
-                write(idx_dir / f"{itemid}_MNDWI.tif", MNDWI(b03, b11), prof)
+                out = idx_dir / f"{itemid}_MNDWI.tif"
+                if overwrite or not out.exists():
+                    b03, _ = read_band(m10 / f"{itemid}_B03.tif")
+                    write(out, MNDWI(b03, b11), prof)
 
-            log.info("[%s %s] %s written", tile_dir.name, month, indices)
+            log.info("[%s %s] monthly indices processed", tile_dir.name, month)
 
         except Exception as e:
-            log.warning("[%s %s] failed: %s", tile_dir.name, month, e)
+            log.warning("[%s %s] skipped: %s", tile_dir.name, month, e)
 
 # --------------------------------------------------
-# STEP 2 — TILE AGGREGATION (MEAN / MEDIAN CONTROL)
+# STEP 2 — Tile aggregation (xarray + dask)
 # --------------------------------------------------
-def aggregate_tile(
-    tile_dir: Path,
-    indices: list[str],
-    do_mean: bool = True,
-    do_median: bool = False,
-):
+def aggregate_tile(tile_dir: Path, indices, do_mean=True, do_median=True):
     outdir = tile_dir / "indices"
     outdir.mkdir(exist_ok=True)
 
     for idx in indices:
-        rasters = list(tile_dir.glob(f"*/indices/*_{idx}.tif"))
+        rasters = sorted(tile_dir.glob(f"*/indices/*_{idx}.tif"))
         if not rasters:
             continue
 
-        stack = []
-        prof = None
-        for r in rasters:
-            arr, prof = read_band(r)
-            stack.append(arr)
+        da_list = [
+            rxr.open_rasterio(r, chunks={"x": 1024, "y": 1024}).squeeze()
+            for r in rasters
+        ]
 
-        data = np.stack(stack)
+        stack = xr.concat(da_list, dim="time")
 
-        if do_mean:
-            mean = np.nanmean(data, axis=0)
-            write(
-                outdir / f"{tile_dir.name}_MEAN_{idx}.tif",
-                mean,
-                prof,
-            )
-            log.info("[%s] MEAN_%s written", tile_dir.name, idx)
+        with ProgressBar():
+            if do_mean:
+                mean = stack.mean(dim="time", skipna=True)
+                mean.rio.to_raster(
+                    outdir / f"{tile_dir.name}_MEAN_{idx}.tif",
+                    compress="DEFLATE"
+                )
 
-        if do_median:
-            median = np.nanmedian(data, axis=0)
-            write(
-                outdir / f"{tile_dir.name}_MEDIAN_{idx}.tif",
-                median,
-                prof,
-            )
-            log.info("[%s] MEDIAN_%s written", tile_dir.name, idx)
+            if do_median:
+                median = stack.median(dim="time", skipna=True)
+                median.rio.to_raster(
+                    outdir / f"{tile_dir.name}_MEDIAN_{idx}.tif",
+                    compress="DEFLATE"
+                )
+
+        log.info("[%s] aggregated %s (mean + median)", tile_dir.name, idx)
 
 # --------------------------------------------------
 # RUN
@@ -163,7 +184,8 @@ def run(
     tiles=None,
     indices=("NDVI","NDBI","BSI","MNDWI"),
     aggregate_mean=True,
-    aggregate_median=False,
+    aggregate_median=True,
+    overwrite_monthly=False,
 ):
     root = Path(root)
     tile_dirs = [p for p in root.iterdir() if p.is_dir()]
@@ -173,17 +195,11 @@ def run(
 
     for tile in tile_dirs:
         log.info("Processing tile %s", tile.name)
+        compute_monthly_indices(tile, indices, overwrite=overwrite_monthly)
+        aggregate_tile(tile, indices, aggregate_mean, aggregate_median)
 
-        # STEP 1: monthly indices
-        compute_monthly_indices(tile, list(indices))
-
-        # STEP 2: aggregation
-        aggregate_tile(
-            tile,
-            list(indices),
-            do_mean=aggregate_mean,
-            do_median=aggregate_median,
-        )
+if __name__ == "__main__":
+    run()
 # -
 
 
