@@ -1,0 +1,2 @@
+n_samples,n_trees,cv_f1_weighted_mean,class_1,class_2,class_3,class_4,class_5,class_6,class_7
+9344,300,0.36167230100652653,1271,1213,1434,1432,1272,1313,1409
