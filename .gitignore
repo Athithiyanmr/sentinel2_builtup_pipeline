@@ -23,6 +23,7 @@ models/
 predictions/
 *.sqlite
 *.gpkg
+*.tif
 
 # OS
 .DS_Store
