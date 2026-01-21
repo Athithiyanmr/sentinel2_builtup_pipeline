@@ -12,3 +12,7 @@ pandas
 scikit-image
 osmnx
 matplotlib
+rioxarray
+xarray
+dask
+bottleneck
