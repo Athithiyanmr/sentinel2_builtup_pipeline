@@ -1,6 +1,7 @@
 geopandas
 rasterio
 numpy
+pyproj
 scikit-learn
 joblib
 tqdm
