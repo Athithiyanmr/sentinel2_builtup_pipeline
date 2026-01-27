@@ -1,0 +1,54 @@
+name: sentinel2
+channels:
+  - conda-forge
+dependencies:
+  # ------------------
+  # Core
+  # ------------------
+  - python=3.10
+  - pip
+
+  # ------------------
+  # Scientific stack
+  # ------------------
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - joblib
+
+  # ------------------
+  # Geospatial stack (conda-first always)
+  # ------------------
+  - gdal
+  - rasterio
+  - geopandas
+  - shapely
+  - fiona
+  - pyproj
+  - rtree
+  - xarray
+  - rioxarray
+  - netcdf4
+
+  # ------------------
+  # Remote sensing / IO
+  # ------------------
+  - pystac
+  - pystac-client
+  - requests
+  - tqdm
+
+  # ------------------
+  # Optional but useful
+  # ------------------
+  - jupyterlab
+  - ipykernel
+
+  # ------------------
+  # Pip-only packages
+  # ------------------
+  - pip:
+      - planetary-computer
+      - opencv-python
