@@ -43,7 +43,7 @@ dependencies:
   # ------------------
   # Optional but useful
   # ------------------
-  - jupyterlab
+  - notebook
   - ipykernel
 
   # ------------------
