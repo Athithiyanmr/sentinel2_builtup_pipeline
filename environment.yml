@@ -32,6 +32,9 @@ dependencies:
   - rioxarray
   - netcdf4
 
+  - dask
+  - distributed
+
   # ------------------
   # Remote sensing / IO
   # ------------------
