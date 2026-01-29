@@ -1,51 +1,73 @@
-# macOS
+# ==================================================
+# macOS / System
+# ==================================================
 .DS_Store
 .AppleDouble
 .LSOverride
-
-# Thumbnails
 ._*
-
-# Icon?
 Icon
+Thumbs.db
+desktop.ini
 
-# Vim and other editors
+# ==================================================
+# Editor temp files
+# ==================================================
 *~
 *.swp
 *.swo
+.vscode/
+.idea/
 
+# ==================================================
 # Python
+# ==================================================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+.eggs/
 
-# Virtual environments
+# ==================================================
+# Virtual environments / secrets
+# ==================================================
+.env
+.venv
 env/
 venv/
 *.env
 
-# Jupyter checkpoints
+# ==================================================
+# Jupyter
+# ==================================================
 .ipynb_checkpoints/
-
-# Jupyter metadata
 *.ipynb_meta
 
-# VSCode
-.vscode/
+# ==================================================
+# Data & heavy outputs (DO NOT commit)
+# ==================================================
+data/
+models/
+predictions/
 
-# Conda environment files
+*.tif
+*.tiff
+*.jp2
+*.part
+*.sqlite
+*.gpkg
+
+# (optional – add if you use these formats)
+*.vrt
+*.ovr
+*.hdf
+*.nc
+
+# ==================================================
+# Conda / logs / build
+# ==================================================
 *.conda
 *.yml
-
-# Logs
 *.log
-
-# Build / distribution
 build/
 dist/
-*.egg-info/
-
-# System files
-Thumbs.db
-desktop.ini
