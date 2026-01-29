@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
+# +
 from __future__ import annotations
-
 import logging
 from pathlib import Path
 from typing import Sequence, Optional, Tuple
-
 import geopandas as gpd
 import numpy as np
 import rasterio
@@ -12,11 +11,9 @@ from rasterio.mask import mask
 from shapely.geometry import box
 from joblib import dump
 import pandas as pd
-
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-
 # ==================================================
 # LOGGING
 # ==================================================
@@ -25,7 +22,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s"
 )
 log = logging.getLogger("builtup-ml")
-
 # ==================================================
 # PATHS
 # ==================================================
@@ -39,12 +35,14 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True)
 PREDICTION_DIR.mkdir(parents=True, exist_ok=True)
 SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 
+
 # ==================================================
 # HELPERS
 # ==================================================
 def resolve(p: str | Path) -> Path:
     p = Path(p)
     return p if p.is_absolute() else PROJECT_ROOT / p
+
 
 
 def tile_feature_paths(
@@ -65,6 +63,8 @@ def tile_feature_paths(
         paths.append(p)
 
     return paths
+
+
 
 
 # ==================================================
@@ -167,8 +167,10 @@ def extract_training(
     finally:
         for s in srcs:
             s.close()
-
-
+            
+            
+            
+            
 # ==================================================
 # PREDICTION
 # ==================================================
@@ -230,8 +232,9 @@ def predict_tile_rasters(
     finally:
         for s in srcs:
             s.close()
-
-
+            
+            
+            
 # ==================================================
 # MAIN PIPELINE
 # ==================================================
