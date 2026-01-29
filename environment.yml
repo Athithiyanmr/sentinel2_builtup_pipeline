@@ -44,9 +44,11 @@ dependencies:
   - tqdm
 
   # ------------------
-  # Optional but useful
+  # Jupyter / Notebook
   # ------------------
   - notebook
+  - nbclassic
+  - jupytext
   - ipykernel
 
   # ------------------
@@ -55,3 +57,6 @@ dependencies:
   - pip:
       - planetary-computer
       - opencv-python
+      - osmnx
+      - scikit-image
+      - bottleneck
