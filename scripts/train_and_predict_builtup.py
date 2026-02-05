@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # +
 from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Sequence, Optional, Tuple
+
 import geopandas as gpd
 import numpy as np
 import rasterio
@@ -11,9 +13,12 @@ from rasterio.mask import mask
 from shapely.geometry import box
 from joblib import dump
 import pandas as pd
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+
+
 # ==================================================
 # LOGGING
 # ==================================================
@@ -22,6 +27,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s"
 )
 log = logging.getLogger("builtup-ml")
+
+
 # ==================================================
 # PATHS
 # ==================================================
@@ -44,7 +51,6 @@ def resolve(p: str | Path) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
-
 def tile_feature_paths(
     tile_dir: Path,
     year: str,
@@ -63,8 +69,6 @@ def tile_feature_paths(
         paths.append(p)
 
     return paths
-
-
 
 
 # ==================================================
@@ -90,9 +94,9 @@ def pre_ml_candidate_mask(
 
 
 # ==================================================
-# TRAINING SAMPLE EXTRACTION
+# TRAINING EXTRACTION — POLYGONS
 # ==================================================
-def extract_training(
+def extract_training_polygons(
     tile_dir: Path,
     year: str,
     train_gdf: gpd.GeoDataFrame,
@@ -110,7 +114,6 @@ def extract_training(
 
     try:
         tile_box = box(*srcs[0].bounds)
-
         gdf = train_gdf.to_crs(srcs[0].crs)
         gdf = gdf[gdf.geometry.intersects(tile_box)]
 
@@ -137,9 +140,7 @@ def extract_training(
             resh = stack.reshape(stack.shape[0], -1).T
 
             valid = ~np.any(np.isnan(resh), axis=1)
-            candidate = pre_ml_candidate_mask(
-                resh, feature_files, thresholds
-            )
+            candidate = pre_ml_candidate_mask(resh, feature_files, thresholds)
 
             idx = np.where(valid & candidate)[0]
             if idx.size == 0:
@@ -149,17 +150,12 @@ def extract_training(
                 idx = np.random.choice(idx, max_samples, replace=False)
 
             X_all.append(resh[idx])
-            y_all.append(
-                np.full(idx.size, int(row[class_col]), dtype=np.int32)
-            )
+            y_all.append(np.full(idx.size, int(row[class_col]), dtype=np.int32))
 
-            log.info(
-                "[%s] Class %s → %d samples",
-                tile_dir.name, row[class_col], idx.size
-            )
+            log.info("[%s] Class %s → %d samples",
+                     tile_dir.name, row[class_col], idx.size)
 
         if not X_all:
-            log.warning("[%s] Polygons found but no valid samples", tile_dir.name)
             return None, None
 
         return np.vstack(X_all), np.concatenate(y_all)
@@ -167,10 +163,62 @@ def extract_training(
     finally:
         for s in srcs:
             s.close()
-            
-            
-            
-            
+
+
+# ==================================================
+# TRAINING EXTRACTION — POINTS
+# ==================================================
+def extract_training_points(
+    tile_dir: Path,
+    year: str,
+    train_gdf: gpd.GeoDataFrame,
+    class_col: str,
+    feature_files: Sequence[str],
+    thresholds: dict,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+
+    paths = tile_feature_paths(tile_dir, year, feature_files)
+    if paths is None:
+        return None, None
+
+    srcs = [rasterio.open(p) for p in paths]
+
+    try:
+        gdf = train_gdf.to_crs(srcs[0].crs)
+        tile_box = box(*srcs[0].bounds)
+        gdf = gdf[gdf.geometry.within(tile_box)]
+
+        if gdf.empty:
+            log.info("[%s] No intersecting training points", tile_dir.name)
+            return None, None
+
+        coords = [(pt.x, pt.y) for pt in gdf.geometry]
+
+        features = []
+        for src in srcs:
+            vals = np.array(list(src.sample(coords))).reshape(-1)
+            features.append(vals)
+
+        X = np.stack(features, axis=1)
+        y = gdf[class_col].astype(int).values
+
+        valid = (
+            ~np.any(np.isnan(X), axis=1) &
+            ~np.any(np.isinf(X), axis=1)
+        )
+        X, y = X[valid], y[valid]
+
+        candidate = pre_ml_candidate_mask(X, feature_files, thresholds)
+        X, y = X[candidate], y[candidate]
+
+        log.info("[%s] Point samples → %d", tile_dir.name, len(y))
+        return X, y
+
+    finally:
+        for s in srcs:
+            s.close()
+
+
 # ==================================================
 # PREDICTION
 # ==================================================
@@ -196,29 +244,22 @@ def predict_tile_rasters(
         out_dir = PREDICTION_DIR / tile_dir.name / year
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        prob_path = out_dir / "BUILTUP_PROB.tif"
-        mask_path = out_dir / "BUILTUP_MASK.tif"
-
-        with rasterio.open(prob_path, "w", **profile) as dp, \
-             rasterio.open(mask_path, "w", **{**profile, "dtype": "uint8"}) as dm:
+        with rasterio.open(out_dir / "BUILTUP_PROB.tif", "w", **profile) as dp, \
+             rasterio.open(out_dir / "BUILTUP_MASK.tif", "w",
+                           **{**profile, "dtype": "uint8"}) as dm:
 
             for _, win in srcs[0].block_windows(1):
                 bands = [s.read(1, window=win) for s in srcs]
                 stack = np.stack(bands, axis=-1)
                 resh = stack.reshape(-1, stack.shape[-1])
 
-                invalid = (
-                    np.any(np.isnan(resh), axis=1) |
-                    np.any(np.isinf(resh), axis=1)
-                )
-
                 probs = np.zeros(len(resh), dtype="float32")
-                valid = ~invalid
+                valid = ~np.any(np.isnan(resh), axis=1)
 
                 if valid.any():
                     probs[valid] = clf.predict_proba(resh[valid])[:, 1]
 
-                # HARD WATER MASK
+                # Hard water mask
                 probs[resh[:, idx_mndwi] > 0.15] = 0.0
 
                 prob_img = probs.reshape(stack.shape[:2])
@@ -232,9 +273,8 @@ def predict_tile_rasters(
     finally:
         for s in srcs:
             s.close()
-            
-            
-            
+
+
 # ==================================================
 # MAIN PIPELINE
 # ==================================================
@@ -250,6 +290,7 @@ def run(
     n_trees: int = 200,
     prob_threshold: float = 0.8,
     out_model: str = "output/model/builtup_rf.joblib",
+    geometry_type: str = "polygon",
 ):
 
     root = resolve(root)
@@ -265,73 +306,46 @@ def run(
     X_all, y_all = [], []
 
     for tile in tile_dirs:
-        log.info("Extracting training samples → %s", tile.name)
-        X, y = extract_training(
-            tile, year, train_gdf, class_col,
-            feature_files, max_samples_per_poly,
-            index_thresholds
-        )
+        log.info("Extracting training → %s", tile.name)
+
+        if geometry_type == "point":
+            X, y = extract_training_points(
+                tile, year, train_gdf, class_col,
+                feature_files, index_thresholds
+            )
+        else:
+            X, y = extract_training_polygons(
+                tile, year, train_gdf, class_col,
+                feature_files, max_samples_per_poly,
+                index_thresholds
+            )
+
         if X is not None:
             X_all.append(X)
             y_all.append(y)
 
     if not X_all:
-        raise RuntimeError(
-            "No training samples extracted. "
-            "Check CRS, overlap, thresholds, and feature rasters."
-        )
+        raise RuntimeError("No training samples extracted")
 
     X = np.vstack(X_all)
     y = np.concatenate(y_all)
 
-    log.info("TOTAL samples: %d", len(y))
-    log.info("Class balance: %s", np.bincount(y))
-
-    # ---------------------------
-    # TRAIN / TEST SPLIT
-    # ---------------------------
     Xtr, Xte, ytr, yte = train_test_split(
         X, y, test_size=0.2, stratify=y, random_state=42
     )
 
-    log.info("Train samples: %d | Test samples: %d", len(ytr), len(yte))
-    log.info("Train balance: %s", np.bincount(ytr))
-    log.info("Test balance : %s", np.bincount(yte))
-
-    # ---------------------------
-    # SAVE TRAIN / TEST DATA
-    # ---------------------------
-    cols = [f.replace(".tif", "") for f in feature_files]
-
-    df_train = pd.DataFrame(Xtr, columns=cols)
-    df_train["label"] = ytr
-    df_test = pd.DataFrame(Xte, columns=cols)
-    df_test["label"] = yte
-
-    df_train.to_csv(SAMPLES_DIR / "train_samples.csv", index=False)
-    df_test.to_csv(SAMPLES_DIR / "test_samples.csv", index=False)
-
-    log.info("Saved training & test samples to output/samples/")
-
-    # ---------------------------
-    # MODEL TRAINING
-    # ---------------------------
     clf = RandomForestClassifier(
         n_estimators=n_trees,
         class_weight="balanced",
         n_jobs=-1,
         random_state=42,
     )
-
     clf.fit(Xtr, ytr)
-    log.info("\n%s", classification_report(yte, clf.predict(Xte)))
 
-    out_model = resolve(out_model)
-    dump(clf, out_model)
-    log.info("Model saved → %s", out_model)
+    log.info("\n%s", classification_report(yte, clf.predict(Xte)))
+    dump(clf, resolve(out_model))
 
     for tile in tile_dirs:
-        log.info("Predicting → %s (%s)", tile.name, year)
         predict_tile_rasters(
             tile, year, clf, feature_files, prob_threshold
         )
