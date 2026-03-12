@@ -1,160 +1,193 @@
-🌍 Sentinel-2 Built-up Area Detection Pipeline
+# 🛰️ Sentinel-2 Built-Up Area Detection Pipeline
 
-A modular, reproducible workflow for mapping built-up areas using Sentinel-2 L2A imagery, spectral indices, Random Forest ML models, and optional OSM building footprints.
+> **An automated, modular ML pipeline for mapping built-up areas from Sentinel-2 satellite imagery — using spectral indices, Random Forest classification, and Microsoft Planetary Computer.**
 
-⸻
+[![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Jupyter](https://img.shields.io/badge/Jupyter-F37626?style=flat-square&logo=jupyter&logoColor=white)](https://jupyter.org)
+[![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-F7931E?style=flat-square&logo=scikit-learn&logoColor=white)](https://scikit-learn.org)
+[![Sentinel-2](https://img.shields.io/badge/Sentinel--2-003DA5?style=flat-square)](https://sentinel.esa.int)
+[![Planetary Computer](https://img.shields.io/badge/Microsoft%20Planetary%20Computer-0078D4?style=flat-square&logo=microsoft&logoColor=white)](https://planetarycomputer.microsoft.com)
+[![MIT License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-⭐ Overview
+---
 
-This repository provides a fully automated geospatial pipeline that:
-	1.	Downloads Sentinel-2 tiles intersecting an AOI (via Microsoft Planetary Computer STAC API)
-	2.	Computes per-tile mean & median spectral indices
-	3.	Builds a machine-learning training dataset using polygons or points
-	4.	Trains a Random Forest classifier
-	5.	Predicts built-up probability & binary built-up maps
-	6.	Organizes outputs cleanly by tile
+## 📌 What Is This?
 
-It is designed for city-scale and regional-scale automation, supporting both research and production use.
+Mapping built-up (urban) areas at scale is essential for urban planning, climate risk assessment, and land-use monitoring. Traditional methods require manual digitization or expensive commercial data.
 
-⸻
+This pipeline automates the full workflow — from satellite data acquisition to a classified built-up map — using free Sentinel-2 imagery and open-source ML tools. It is designed for **city-scale and regional-scale automation**, supporting both research and production use.
 
-🚀 Key Features
+---
 
-📥 1. Automated Sentinel-2 Downloader
-	•	Uses Planetary Computer STAC API
-	•	Downloads selected bands at 10m & 20m resolution
-	•	Cloud filtering using metadata
-	•	Handles tile grouping & file naming
-	•	Resume-safe (skips existing files)
+## 🔄 Pipeline Overview
 
-🛰️ 2. Spectral Index Processing
+```
+1. Download Sentinel-2 tiles (Planetary Computer STAC API)
+       ↓
+2. Compute per-tile spectral index composites
+       ↓
+3. Build ML training dataset from training polygons / points
+       ↓
+4. Train Random Forest classifier
+       ↓
+5. Predict built-up probability & binary maps per tile
+       ↓
+6. Evaluate accuracy (F1, Precision, Recall, Confusion Matrix)
+```
 
-Generates per-tile mean & median composites for:
-	•	NDVI (veg)
-	•	NDBI (built-up)
-	•	BSI (bare soil)
-	•	NDWI / MNDWI (water)
+---
 
-Uses SCL cloud masking.
+## ✨ Key Features
 
-🤖 3. Machine Learning Classification
-	•	Random Forest classifier
-	•	Point and polygon training supported
-	•	Automatic extraction of raster features
-	•	Balanced sampling from polygons
-	•	Built-up probability + binary masks
+**📥 Automated Sentinel-2 Downloader**
+- STAC API via Microsoft Planetary Computer
+- Cloud filtering using scene metadata
+- Downloads selected bands at 10m & 20m resolution
+- Tile-aware search for large AOIs
+- Resume-safe (skips already downloaded files)
 
-🗺️ 4. Optional OSM Building Training
+**🛰️ Spectral Index Processing**
+- Per-tile mean & median composites
+- SCL cloud masking applied before aggregation
+- Indices computed: NDVI, NDBI, BSI, NDWI, MNDWI
 
-You can add OSM building footprints to strengthen built-up training classes.
+**🤖 Random Forest Classification**
+- Supports both point and polygon training data
+- Balanced sampling from polygon regions
+- Outputs built-up probability raster + binary mask
+- 3-fold cross-validation, F1, precision, recall reporting
 
-🧱 5. Modular Scripts
+**🗺️ Optional OSM Building Integration**
+- Augment training with OpenStreetMap building footprints
+- Strengthens urban class separation
 
-scripts/
-  ├── download_s2_pc_by_tile.py
-  ├── mean_indices.py
-  └── train_and_predict_builtup.py
+---
 
-  📁 Recommended Project Structure
-  sentinel2_builtup_pipeline/
+## 🛰️ Spectral Indices Used
+
+| Index | Measures | Formula |
+|---|---|---|
+| NDVI | Vegetation density | (NIR - Red) / (NIR + Red) |
+| NDBI | Built-up surfaces | (SWIR - NIR) / (SWIR + NIR) |
+| BSI | Bare soil | (SWIR + Red) - (NIR + Blue) / ... |
+| NDWI | Water bodies | (Green - NIR) / (Green + NIR) |
+| MNDWI | Modified water | (Green - SWIR) / (Green + SWIR) |
+
+---
+
+## 🗂️ Project Structure
+
+```
+sentinel2_builtup_pipeline/
 │
 ├── scripts/
-│   ├── download_s2_pc_by_tile.py
-│   ├── mean_indices.py
-│   └── train_and_predict_builtup.py
+│   ├── download_s2_pc_by_tile.py      # Sentinel-2 downloader via STAC
+│   ├── mean_indices.py                # Spectral index compositing
+│   └── train_and_predict_builtup.py  # ML training & prediction
 │
 ├── data/
-│   ├── aoi/
-│   │   ├── CMDA.shp  (Your AOI)
-│   │   └── ...
-│   ├── training/
-│   │   ├── CMDA_overall.shp  (Your training polygons/points)
-│   │   └── ...
-│   ├── osm/ (optional)
-│   │   ├── osm_buildings.shp
-│   │   └── ...
-│   └── sentinel/      (will be filled after download)
-│       └── .gitkeep
+│   ├── aoi/           # Area of interest shapefile
+│   ├── training/      # Training polygons or points
+│   ├── osm/           # Optional OSM building footprints
+│   └── sentinel/      # Downloaded satellite tiles (auto-filled)
 │
 ├── output/
-│   ├── models/
-│   ├── prediction_tiles/
+│   ├── models/        # Saved Random Forest model (.joblib)
+│   ├── prediction_tiles/  # Per-tile output rasters
 │   └── logs/
 │
-├── README.md
-├── requirements.txt
-└── .gitignore
+├── run.ipynb          # Interactive notebook workflow
+├── environment.yml
+└── requirements.txt
+```
 
-⚙️ Installation
-1. Install Dependencies
-   
-	conda create --name xyz python==3.10
-	
-	conda activate xyz
-	
-	conda install jupyter nbconvert
-	
-	conda install --file requirements.txt -c conda-forge
+---
 
-   
-3. Prepare Input Data
-   
-✔ Place AOI under:
+## ⚙️ Setup
 
-data/aoi/CMDA.shp
+```bash
+# Create environment
+conda create --name s2builtup python=3.10
+conda activate s2builtup
+conda install jupyter nbconvert
+conda install --file requirements.txt -c conda-forge
+```
 
-✔ Place training dataset under:
-data/training/CMDA_overall.shp
+---
 
-▶️ Usage
-Step 1 — Download Sentinel-2 tiles
+## ▶️ Usage
+
+**Step 1 — Download Sentinel-2 tiles**
+```bash
 python scripts/download_s2_pc_by_tile.py \
-    --outdir data/sentinel \
-    --aoi data/aoi/CMDA.shp \
-    --year 2025 \
-    --cloud 5 \
-    --max-workers 6
- python scripts/mean_indices.py
- python scripts/train_and_predict_builtup.py
+  --outdir data/sentinel \
+  --aoi data/aoi/your_aoi.shp \
+  --year 2024 \
+  --cloud 5 \
+  --max-workers 6
+```
 
-📤 Outputs
+**Step 2 — Compute spectral index composites**
+```bash
+python scripts/mean_indices.py
+```
 
-For each tile:
-File                                           Description
-*_MEAN_*.tif                        Per-pixel multi-acquisition mean indices
-*_MEDIAN_*.tif                      Per-pixel median indices
-*_BUILTUP_PROB.tif                  Built-up probability
-*_BUILTUP_MASK.tif                  Binary classification
+**Step 3 — Train classifier and generate predictions**
+```bash
+python scripts/train_and_predict_builtup.py
+```
 
-Model file:
-output/models/builtup_rf.joblib
-Training summary:
-training_summary.csv
+---
 
-📈 Accuracy & Evaluation
+## 📤 Outputs
 
-The Random Forest classifier provides:
-	•	F1 score
-	•	Precision, recall
-	•	Confusion matrix
-	•	Cross-validation (3-fold)
+| File | Description |
+|---|---|
+| `*_MEAN.tif` | Per-pixel mean spectral index composite |
+| `*_MEDIAN.tif` | Per-pixel median spectral index composite |
+| `*_BUILTUP_PROB.tif` | Built-up probability (0–1) |
+| `*_BUILTUP_MASK.tif` | Binary classification (built-up / non built-up) |
+| `builtup_rf.joblib` | Saved Random Forest model |
+| `training_summary.csv` | Accuracy metrics per run |
 
-You can expand the training dataset at any time to improve results.
+---
 
-🏗️ Roadmap:
-	•	Add UNet / DeepLab deep-learning segmentation
-	•	Time-series built-up change detection
-	•	Zonal statistics for admin boundaries
-	•	Web-map visualization with Leaflet or Kepler.gl
+## 📈 Accuracy Metrics
 
- 🤝 Credits
+The pipeline reports per-run:
+- F1 Score
+- Precision & Recall
+- Confusion Matrix
+- 3-fold Cross-Validation scores
 
-This project was developed with assistance from ChatGPT 5.1 Flagship (OpenAI).
-Satellite data provided via Microsoft Planetary Computer.
+---
 
-📜 License
+## 🗺️ Roadmap
 
-MIT License
+- [ ] UNet / DeepLab deep learning segmentation module
+- [ ] Time-series built-up change detection
+- [ ] Zonal statistics aggregation to admin boundaries
+- [ ] Web map visualization with Leaflet or Kepler.gl
 
+---
 
+## 👤 Author
 
+**Athithiyan M R** — Geospatial Data Scientist | Remote Sensing | Climate Analytics
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/athithiyan-m-r-/)
+[![GitHub](https://img.shields.io/badge/GitHub-Athithiyanmr-181717?style=flat-square&logo=github)](https://github.com/Athithiyanmr)
+
+---
+
+## 🙏 Acknowledgements
+
+- ESA Sentinel-2 Mission
+- Microsoft Planetary Computer & STAC API
+- OpenStreetMap contributors
+
+---
+
+## 📜 License
+
+MIT License © 2026 Athithiyan M R
